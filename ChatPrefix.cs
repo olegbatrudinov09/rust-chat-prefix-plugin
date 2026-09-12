@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Oxide.Plugins
 {
@@ -19,19 +20,19 @@ namespace Oxide.Plugins
 
         private class PluginConfig
         {
-            [JsonProperty("Группы")]
+            [JsonProperty("groups")]
             public Dictionary<string, GroupConfig> Groups { get; set; } = new Dictionary<string, GroupConfig>();
 
-            [JsonProperty("Версия конфига")]
+            [JsonProperty("config_version")]
             public string ConfigVersion { get; set; } = "1.1.0";
         }
 
         private class GroupConfig
         {
-            [JsonProperty("Приоритет")]
+            [JsonProperty("priority")]
             public int Priority { get; set; }
 
-            [JsonProperty("Доступные префиксы")]
+            [JsonProperty("prefixes")]
             public List<string> Prefixes { get; set; } = new List<string>();
         }
 
@@ -148,7 +149,15 @@ namespace Oxide.Plugins
         {
             // Загружаем конфиг
             LoadConfig();
-            config = Config.ReadObject<PluginConfig>();
+            
+            try
+            {
+                config = Config.ReadObject<PluginConfig>();
+            }
+            catch
+            {
+                config = null;
+            }
 
             if (config == null)
             {
@@ -173,8 +182,8 @@ namespace Oxide.Plugins
             CreateGroupsIfNotExist();
 
             Puts("Chat Prefix плагин инициализирован");
-            Puts($"Загружено {config.Groups.Count} групп из конфига");
-            Puts($"Загружено {playerPrefixes.Count} сохранённых префиксов");
+            Puts(string.Format("Загружено {0} групп из конфига", config.Groups.Count));
+            Puts(string.Format("Загружено {0} сохранённых префиксов", playerPrefixes.Count));
         }
 
         private void OnPlayerConnected(BasePlayer player)
@@ -219,8 +228,8 @@ namespace Oxide.Plugins
                 // Проверяем существует ли группа
                 if (!permission.GroupExists(groupName))
                 {
-                    permission.CreateGroup(groupName, $"Группа {groupName}", priority);
-                    Puts($"✓ Создана группа Oxide: {groupName}");
+                    permission.CreateGroup(groupName, string.Format("Группа {0}", groupName), priority);
+                    Puts(string.Format("✓ Создана группа Oxide: {0}", groupName));
                 }
             }
         }
@@ -305,7 +314,7 @@ namespace Oxide.Plugins
         }
 
         /// <summary>
-        /// Показывает игроку список доступных ему префиксов (колонка с дефисами)
+        /// Показыв��ет игроку список доступных ему префиксов (колонка с дефисами)
         /// </summary>
         private void ShowAvailablePrefixes(BasePlayer player)
         {
@@ -317,13 +326,13 @@ namespace Oxide.Plugins
                 // Если у игрока есть YEBOK и это фейк-префикс - выводим как есть
                 if (prefix == "Idi nahuy yebok")
                 {
-                    message += $"-{prefix}\n";
+                    message += string.Format("-{0}\n", prefix);
                 }
                 else
                 {
                     // Получаем цвет префикса и применяем его
                     string color = PrefixColors.ContainsKey(prefix) ? PrefixColors[prefix] : "#FFFFFF";
-                    message += $"-<color={color}>{prefix}</color>\n";
+                    message += string.Format("-<color={0}>{1}</color>\n", color, prefix);
                 }
             }
 
@@ -360,7 +369,7 @@ namespace Oxide.Plugins
 
             if (!found)
             {
-                SendPrivateMessage(player, $"Ошибка: префикса \"{requestedPrefix}\" не существует или у вас нет прав на его использование");
+                SendPrivateMessage(player, string.Format("Ошибка: префикса \"{0}\" не существует или у вас нет прав на его использование", requestedPrefix));
                 return;
             }
 
@@ -373,7 +382,7 @@ namespace Oxide.Plugins
             // Сохраняем в data файл
             SavePlayerPrefixes();
 
-            SendPrivateMessage(player, $"Ваш префикс изменён на <color={PrefixColors[normalizedPrefix]}>{normalizedPrefix}</color>");
+            SendPrivateMessage(player, string.Format("Ваш префикс изменён на <color={0}>{1}</color>", PrefixColors[normalizedPrefix], normalizedPrefix));
         }
 
         /// <summary>
