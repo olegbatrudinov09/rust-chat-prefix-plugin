@@ -5,13 +5,38 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using Newtonsoft.Json;
 
 namespace Oxide.Plugins
 {
-    [Info("Chat Prefix", "OlegBatrudinov", "1.0.0")]
+    [Info("Chat Prefix", "OlegBatrudinov", "1.1.0")]
     [Description("Плагин для смены префикса игрока через /chat с поддержкой привилегий")]
     public class ChatPrefix : RustPlugin
     {
+        // ═══════════════════════════════════════════════════════════════════
+        // СТРУКТУРА КОНФИГА
+        // ═══════════════════════════════════════════════════════════════════
+
+        private class PluginConfig
+        {
+            [JsonProperty("Группы")]
+            public Dictionary<string, GroupConfig> Groups { get; set; } = new Dictionary<string, GroupConfig>();
+
+            [JsonProperty("Версия конфига")]
+            public string ConfigVersion { get; set; } = "1.1.0";
+        }
+
+        private class GroupConfig
+        {
+            [JsonProperty("Приоритет")]
+            public int Priority { get; set; }
+
+            [JsonProperty("Доступные префиксы")]
+            public List<string> Prefixes { get; set; } = new List<string>();
+        }
+
+        private PluginConfig config;
+
         // ═══════════════════════════════════════════════════════════════════
         // КОНФИГУРАЦИЯ И КОНСТАНТЫ
         // ═══════════════════════════════════════════════════════════════════
@@ -31,17 +56,8 @@ namespace Oxide.Plugins
         // Специальная привилегия YEBOK
         private const string YEBOK_PRIVILEGE = "yebok";
 
-        // Доступные префиксы для каждой привилегии
-        private static readonly Dictionary<string, List<string>> PrefixesByPrivilege = new Dictionary<string, List<string>>
-        {
-            { "player", new List<string> { "PLAYER" } },
-            { "vip", new List<string> { "VIP", "PLAYER" } },
-            { "premium", new List<string> { "PREMIUM", "VIP", "PLAYER" } },
-            { "ultra", new List<string> { "ULTRA", "PREMIUM", "VIP", "PLAYER" } },
-            { "kotokbas", new List<string> { "KOTOKBAS", "ULTRA", "PREMIUM", "VIP", "PLAYER" } },
-            { "moderator", new List<string> { "MODERATOR", "YEBOK", "KOTOKBAS", "ULTRA", "PREMIUM", "VIP", "PLAYER" } },
-            { "admin", new List<string> { "ADMIN", "MODERATOR", "YEBOK", "KOTOKBAS", "ULTRA", "PREMIUM", "VIP", "PLAYER" } }
-        };
+        // Доступные префиксы для каждой привилегии (из конфига)
+        private Dictionary<string, List<string>> PrefixesByPrivilege = new Dictionary<string, List<string>>();
 
         // Цвета префиксов в hex формате для Rust чата
         private static readonly Dictionary<string, string> PrefixColors = new Dictionary<string, string>
@@ -60,18 +76,105 @@ namespace Oxide.Plugins
         private Dictionary<ulong, string> playerPrefixes = new Dictionary<ulong, string>();
 
         // ═══════════════════════════════════════════════════════════════════
+        // КОНФИГУРАЦИЯ ПО УМОЛЧАНИЮ
+        // ═══════════════════════════════════════════════════════════════════
+
+        protected override void LoadDefaultConfig()
+        {
+            config = new PluginConfig();
+
+            // Дефолтная конфигурация с группами
+            config.Groups = new Dictionary<string, GroupConfig>
+            {
+                {
+                    "player", new GroupConfig
+                    {
+                        Priority = 1,
+                        Prefixes = new List<string> { "PLAYER" }
+                    }
+                },
+                {
+                    "vip", new GroupConfig
+                    {
+                        Priority = 2,
+                        Prefixes = new List<string> { "VIP", "PLAYER" }
+                    }
+                },
+                {
+                    "premium", new GroupConfig
+                    {
+                        Priority = 3,
+                        Prefixes = new List<string> { "PREMIUM", "VIP", "PLAYER" }
+                    }
+                },
+                {
+                    "ultra", new GroupConfig
+                    {
+                        Priority = 4,
+                        Prefixes = new List<string> { "ULTRA", "PREMIUM", "VIP", "PLAYER" }
+                    }
+                },
+                {
+                    "kotokbas", new GroupConfig
+                    {
+                        Priority = 5,
+                        Prefixes = new List<string> { "KOTOKBAS", "ULTRA", "PREMIUM", "VIP", "PLAYER" }
+                    }
+                },
+                {
+                    "moderator", new GroupConfig
+                    {
+                        Priority = 6,
+                        Prefixes = new List<string> { "MODERATOR", "YEBOK", "KOTOKBAS", "ULTRA", "PREMIUM", "VIP", "PLAYER" }
+                    }
+                },
+                {
+                    "admin", new GroupConfig
+                    {
+                        Priority = 7,
+                        Prefixes = new List<string> { "ADMIN", "MODERATOR", "YEBOK", "KOTOKBAS", "ULTRA", "PREMIUM", "VIP", "PLAYER" }
+                    }
+                }
+            };
+
+            SaveConfig();
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
         // ЖИЗНЕННЫЙ ЦИКЛ ПЛАГИНА
         // ═══════════════════════════════════════════════════════════════════
 
         private void OnServerInitialized()
         {
+            // Загружаем конфиг
+            LoadConfig();
+            config = Config.ReadObject<PluginConfig>();
+
+            if (config == null)
+            {
+                config = new PluginConfig();
+                LoadDefaultConfig();
+            }
+
+            // Инициализируем словарь префиксов из конфига
+            PrefixesByPrivilege.Clear();
+            foreach (var group in config.Groups)
+            {
+                PrefixesByPrivilege[group.Key] = group.Value.Prefixes;
+            }
+
             // Загружаем сохранённые префиксы из Oxide Data файла
             LoadPlayerPrefixes();
 
             // Регистрируем разрешение для особой привилегии YEBOK
-            permission.RegisterPermission("chatprefix.yebok", this);
+            permission.RegisterPermission("chatprefix.yebot", this);
+
+            // Автоматически создаём группы Oxide если их нет
+            CreateGroupsIfNotExist();
 
             Puts("Chat Prefix плагин инициализирован");
+            Puts($"Загружено {config.Groups.Count} групп из конфига");
+            Puts($"Загружено {playerPrefixes.Count} сохранённых префиксов");
         }
 
         private void OnPlayerConnected(BasePlayer player)
@@ -100,7 +203,29 @@ namespace Oxide.Plugins
             Puts("Chat Prefix плагин выгружен");
         }
 
-        // ═══���═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════
+        // АВТОМАТИЧЕСКОЕ СОЗДАНИЕ ГРУПП OXIDE
+        // ═══════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Автоматически создаёт группы Oxide если они не существуют
+        /// </summary>
+        private void CreateGroupsIfNotExist()
+        {
+            foreach (var groupName in config.Groups.Keys)
+            {
+                int priority = config.Groups[groupName].Priority;
+                
+                // Проверяем существует ли группа
+                if (!permission.GroupExists(groupName))
+                {
+                    permission.CreateGroup(groupName, $"Группа {groupName}", priority);
+                    Puts($"✓ Создана группа Oxide: {groupName}");
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
         // КОМАНДА /chat
         // ═══════════════════════════════════════════════════════════════════
 
@@ -168,9 +293,10 @@ namespace Oxide.Plugins
             List<string> available = new List<string>();
             for (int i = 0; i <= privIndex; i++)
             {
-                if (PrefixesByPrivilege.ContainsKey(PrivilegeHierarchy[i]))
+                string groupName = PrivilegeHierarchy[i];
+                if (PrefixesByPrivilege.ContainsKey(groupName))
                 {
-                    available.AddRange(PrefixesByPrivilege[PrivilegeHierarchy[i]]);
+                    available.AddRange(PrefixesByPrivilege[groupName]);
                 }
             }
 
@@ -269,7 +395,6 @@ namespace Oxide.Plugins
         private void LoadPlayerPrefixes()
         {
             playerPrefixes = Interface.Oxide.DataFileSystem.ReadObject<Dictionary<ulong, string>>("ChatPrefix/player_prefixes") ?? new Dictionary<ulong, string>();
-            Puts($"Загружено {playerPrefixes.Count} сохранённых префиксов");
         }
 
         /// <summary>
